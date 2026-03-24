@@ -1,0 +1,23 @@
+# Node 相关
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# C++ 编译产物
+backend/build/
+backend/bin/
+backend/*.o
+backend/*.out
+*.prof
+
+# 前端打包产物
+frontend/dist/
+frontend/dist-ssr/
+
+# OSS 上传的用户文件 (绝对不能传用户私有文件到 Github！)
+oss_server/uploads/
+
+# 环境变量与配置缓存
+.env
+.env.local
+.DS_Store
