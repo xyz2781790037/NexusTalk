@@ -1,4 +1,4 @@
-// gateway_node/server.js
+// gateway/server.js
 const WebSocket = require('ws');
 const net = require('net');
 const express = require('express');
@@ -7,124 +7,132 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 
-// ================= 配置区 =================
-const WS_PORT = 8081;         // 前端 WebSocket 连接端口
-const HTTP_PORT = 8082;       // 前端 HTTP 文件上传/下载端口
-const TCP_HOST = '127.0.0.1'; // 你的 C++ Muduo 服务器 IP
-const TCP_PORT = 8080;        // 你的 C++ Muduo 服务器主聊天端口
+const WS_PORT = 8081;         
+const HTTP_PORT = 8082;       
+const TCP_HOST = '127.0.0.1'; 
+const TCP_PORT = 8080;        
 const UPLOAD_DIR = path.join(__dirname, 'uploads');
 
-// 确保上传目录存在
 if (!fs.existsSync(UPLOAD_DIR)) {
     fs.mkdirSync(UPLOAD_DIR);
 }
 
-// ================= 1. HTTP 文件服务 (Express + Multer) =================
 const app = express();
-app.use(cors()); // 允许前端跨域请求
+app.use(cors()); 
 
-// 配置文件存储引擎
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
         cb(null, UPLOAD_DIR);
     },
     filename: function (req, file, cb) {
-        // 防止文件名冲突，追加时间戳
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        cb(null, uniqueSuffix + '-' + file.originalname);
+        const ext = path.extname(file.originalname) || '';
+        const safeName = Date.now() + '-' + Math.random().toString(36).substring(2, 8) + ext;
+        cb(null, safeName);
     }
 });
 const upload = multer({ storage: storage });
 
-// 文件上传接口
+app.get('/ping', (req, res) => {
+    res.send('8082 端口已打通，网关文件微服务运行正常！');
+});
+
 app.post('/api/upload', upload.single('file'), (req, res) => {
     if (!req.file) {
         return res.status(400).json({ code: 400, msg: 'No file uploaded' });
     }
-    console.log(`[HTTP] 文件上传成功: ${req.file.filename}`);
-    // 返回文件访问路径供前端发送消息使用
+    
+    const host = req.hostname; 
+    let realName = '未知文件';
+    try {
+        realName = decodeURIComponent(req.file.originalname);
+    } catch (e) {
+        realName = req.file.originalname;
+    }
+
+    // 【核心修复 1】：把真实的中文名挂在 URL 参数 ?name= 后面，供下载时提取
+    const encodedRealName = encodeURIComponent(realName);
+    const fileUrl = `http://${host}:${HTTP_PORT}/api/download/${req.file.filename}?name=${encodedRealName}`;
+
     res.json({
         code: 200,
         data: {
-            fileName: req.file.originalname,
+            fileName: realName,
             savedName: req.file.filename,
             size: req.file.size,
-            url: `http://localhost:${HTTP_PORT}/api/download/${req.file.filename}`
+            url: fileUrl
         }
     });
 });
 
-// 文件下载/静态资源访问接口
 app.use('/api/download', express.static(UPLOAD_DIR));
 
-app.listen(HTTP_PORT, () => {
+app.get('/api/download/:filename', (req, res) => {
+    const rawFilename = req.params.filename; 
+    // 【核心修复 2】：提取 URL 参数中的真实中文名
+    const originalName = req.query.name;
+
+    const path1 = path.join(UPLOAD_DIR, rawFilename); 
+    const path2 = path.join(UPLOAD_DIR, decodeURIComponent(rawFilename)); 
+    const path3 = path.join(UPLOAD_DIR, encodeURIComponent(rawFilename)); 
+    
+    let targetPath = null;
+    if (fs.existsSync(path1)) targetPath = path1;
+    else if (fs.existsSync(path2)) targetPath = path2;
+    else if (fs.existsSync(path3)) targetPath = path3;
+
+    if (targetPath) {
+        if (originalName) {
+            // 触发浏览器的强制下载，并命名为真实的中文名
+            res.download(targetPath, originalName);
+        } else {
+            res.sendFile(targetPath);
+        }
+    } else {
+        res.status(404).send('文件在服务器硬盘上已丢失');
+    }
+});
+
+app.listen(HTTP_PORT, '0.0.0.0', () => {
     console.log(`[HTTP] 文件服务已启动，监听端口: ${HTTP_PORT}`);
 });
 
-// ================= 2. WebSocket -> TCP 代理服务 =================
-const wss = new WebSocket.Server({ port: WS_PORT });
+const wss = new WebSocket.Server({ port: WS_PORT, host: '0.0.0.0' });
 
 console.log(`[WS] WebSocket 网关已启动，监听端口: ${WS_PORT}`);
 
 wss.on('connection', (ws) => {
-    console.log('[WS] 前端建立新连接');
-
-    // 为当前 WS 客户端建立专属的 TCP 连接到 Muduo
     const tcpClient = new net.Socket();
     
-    tcpClient.connect(TCP_PORT, TCP_HOST, () => {
-        console.log(`[TCP] 已连接到 Muduo 聊天服务器 ${TCP_HOST}:${TCP_PORT}`);
-    });
+    tcpClient.connect(TCP_PORT, TCP_HOST, () => {});
 
-    // 接收前端 WS 消息 -> 加上 4 字节大端序长度头 -> 转发给 Muduo
     ws.on('message', (message) => {
         const payload = Buffer.isBuffer(message) ? message : Buffer.from(message);
         const header = Buffer.alloc(4);
-        header.writeInt32BE(payload.length, 0); // 对应 C++ 的 htonl(len)
-        
+        header.writeInt32BE(payload.length, 0); 
         tcpClient.write(header);
         tcpClient.write(payload);
     });
 
-    // 接收 Muduo TCP 消息 -> 拆包 -> 转发给前端 WS
     let recvBuffer = Buffer.alloc(0);
     
     tcpClient.on('data', (data) => {
         recvBuffer = Buffer.concat([recvBuffer, data]);
-
-        // 处理粘包与半包 (对应 C++ MessageSplitter 逻辑)
         while (recvBuffer.length >= 4) {
-            const msgLen = recvBuffer.readInt32BE(0); // 对应 C++ 的 ntohl(len)
-            
+            const msgLen = recvBuffer.readInt32BE(0); 
             if (recvBuffer.length >= 4 + msgLen) {
-                // 提取完整消息体
                 const msgPayload = recvBuffer.slice(4, 4 + msgLen);
-                
-                // 转发给前端 Vue
                 if (ws.readyState === WebSocket.OPEN) {
                     ws.send(msgPayload.toString('utf8'));
                 }
-                
-                // 截断已处理的 Buffer
                 recvBuffer = recvBuffer.slice(4 + msgLen);
             } else {
-                // 数据不够一个完整的包，等待下一次 data 事件
                 break;
             }
         }
     });
 
-    // 异常与断开清理
-    ws.on('close', () => {
-        console.log('[WS] 前端断开连接');
-        tcpClient.destroy();
-    });
-    
-    tcpClient.on('close', () => {
-        console.log('[TCP] 对应 Muduo 连接已断开');
-        if (ws.readyState === WebSocket.OPEN) ws.close();
-    });
-
-    ws.on('error', (err) => console.error('[WS] 错误:', err.message));
-    tcpClient.on('error', (err) => console.error('[TCP] 错误:', err.message));
+    ws.on('close', () => tcpClient.destroy());
+    tcpClient.on('close', () => { if (ws.readyState === WebSocket.OPEN) ws.close(); });
+    ws.on('error', () => {});
+    tcpClient.on('error', () => {});
 });

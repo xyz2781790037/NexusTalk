@@ -19,6 +19,46 @@ void handleData::Megcycle(const TcpConnectionPtr conn,
         auto jsonData = nlohmann::json::parse(meg);
         if (jsonData.contains("type")) {
             LOG_DEBUG << "JSON 正常";
+
+            // [修改] 提前提取 type 字符串
+            std::string typeStr = jsonData["type"].get<std::string>();
+
+            // [新增核心防崩溃拦截]：在进入底层的枚举转换前，直接拦截 invite
+            // 指令！
+            if (typeStr == "invite") {
+                LOG_INFO << "处理群聊邀请...";
+                std::string inviter = jsonData["account"];  // user:xxx
+                std::string invitee = jsonData["target"];   // user:yyy
+                std::string group = jsonData["group"];      // grop:zzz
+
+                // 检查邀请者是否在群里
+                if (redis.getData(group, inviter) != "null") {
+                    // 检查被邀请者是否已经在群里
+                    if (redis.getData(group, invitee) != "null") {
+                        conn->send(MessageSplitter::encodeMessage(
+                            sendMeg("该好友已经在群聊里了", Type::UEXECUTE)
+                                .dump()));
+                    } else {
+                        // 封装邀请信令，投递到对方的离线/在线通知队列
+                        nlohmann::json js;
+                        js["account"] = inviter;
+                        js["type"] = "invitation";
+                        js["name"] = group;
+                        js["result"] = "no";
+                        redis.waitHandleMeg(invitee, js);
+                        conn->send(MessageSplitter::encodeMessage(
+                            sendMeg("邀请请求已发送！", Type::UEXECUTE)
+                                .dump()));
+                    }
+                } else {
+                    conn->send(MessageSplitter::encodeMessage(
+                        sendMeg("你不在该群聊中，无法邀请", Type::UEXECUTE)
+                            .dump()));
+                }
+                return;  // [核心] 处理完毕直接返回，完美避开下面的枚举转换触发
+                         // Fatal！
+            }
+
             Type::types type = Type::getDataType(jsonData["type"]);
             LOG_DEBUG << "type is :" << type;
             if (type == Type::MESSAGE) {
@@ -33,15 +73,12 @@ void handleData::Megcycle(const TcpConnectionPtr conn,
                     return;
                 }
 
-                // 【核心修复】：无论双方状态，无条件存入历史记录 read: 表
                 pool.enqueue([jsonData, &redis, a, b, this] {
                     std::string key = tool::swapsort(a, b, "read:");
                     redis.storeReadMeg({jsonData.dump()}, key);
 
-                    // 检查对方是否正在看着当前聊天界面
                     std::string key2 = tool::spellName(b, a, "chat:");
                     if (!chatStatus_[key2]) {
-                        // 如果对方没在看你，额外存一份离线表触发未读红点
                         redis.storeMessages(b, a, jsonData.dump());
                     }
                 });
@@ -54,36 +91,24 @@ void handleData::Megcycle(const TcpConnectionPtr conn,
                     LOG_DEBUG << jsonData["to"] << "不在线";
                 }
             } else if (type == Type::REGISTER) {
-                LOG_INFO << "进入register";
                 handleRegister(conn, jsonData, redis);
             } else if (type == Type::LOGIN) {
-                LOG_INFO << "进入login";
                 handleLogin(conn, jsonData, redis);
             } else if (type == Type::GETPWD) {
-                LOG_INFO << "进入getpwd";
                 returnPwd(conn, jsonData, redis);
-                LOG_INFO << "离开getpwd";
             } else if (type == Type::REVISE) {
-                LOG_INFO << "进入revise";
                 revise(conn, jsonData, redis);
             } else if (type == Type::DELETE) {
-                LOG_INFO << "进入delete";
                 deleteUser(conn, jsonData, redis);
             } else if (type == Type::ADD) {
-                LOG_INFO << "进入add";
                 addAll(conn, jsonData, redis);
-                LOG_INFO << "退出add";
             } else if (type == Type::SHIP) {
-                LOG_INFO << "进入ship";
                 updataShip(conn, jsonData, redis);
             } else if (type == Type::MESSDATA) {
-                LOG_INFO << "进入messdata";
                 findmess(conn, jsonData, redis);
             } else if (type == Type::VERIFY) {
-                LOG_INFO << "进入verify";
                 verify(conn, jsonData, redis);
             } else if (type == Type::SEE) {
-                LOG_INFO << "进入see";
                 see(conn, jsonData, redis);
             } else if (type == Type::CHAT) {
                 sendOfflineMeg(conn, jsonData, redis);
@@ -107,11 +132,7 @@ void handleData::Megcycle(const TcpConnectionPtr conn,
                 handlegMessage(conn, jsonData, redis);
             } else if (type == Type::CMD) {
                 handleCmd(conn, jsonData, redis);
-            }
-            // [修改] 移除了原有的 Type::FILE, Type::LOOK, Type::LIST
-            // 路由判断。前端发文件现在直接当做普通文本（包含URL）的
-            // Type::MESSAGE 路由。
-            else if (type == Type::HISTORY) {
+            } else if (type == Type::HISTORY) {
                 seeHistory(conn, jsonData, redis);
             } else if (type == Type::TCP) {
                 heartTcp(conn, jsonData, redis, recviveTime);
@@ -124,7 +145,6 @@ void handleData::Megcycle(const TcpConnectionPtr conn,
 void handleData::handleRegister(const TcpConnectionPtr& conn,
                                 nlohmann::json& jsonData,
                                 redisCmd& redis) {
-    // 【新增核心防御】：后端强制校验验证码
     if (!jsonData.contains("code") || codes_[conn] != jsonData["code"]) {
         conn->send(MessageSplitter::encodeMessage(
             sendMeg("验证码错误或已失效", Type::EXECUTE).dump()));
@@ -194,7 +214,6 @@ void handleData::returnPwd(const TcpConnectionPtr& conn,
     verCode vercode_;
     if (jsonData["return"] == "register") {
         codes_[conn] = vercode_.verify(jsonData["account"]);
-        // 【新增】：告诉前端验证码发送成功
         conn->send(MessageSplitter::encodeMessage(
             sendMeg("验证码已发送到邮箱", Type::EXECUTE).dump()));
         return;
@@ -514,7 +533,6 @@ void handleData::balckName(const TcpConnectionPtr& conn,
     std::string targetAcc = jsonData["name"].get<std::string>();
     std::string blakKey = "blak:" + userAcc.substr(5);
 
-    // 包含 return 字段代表解除拉黑
     if (jsonData.contains("return")) {
         if (redis.getData(blakKey, targetAcc) != "null") {
             redis.hdel(blakKey, targetAcc);
@@ -527,7 +545,6 @@ void handleData::balckName(const TcpConnectionPtr& conn,
         return;
     }
 
-    // 执行拉黑操作
     if (redis.isfriend(userAcc, targetAcc)) {
         redis.hset(blakKey, targetAcc, "0");
         conn->send(MessageSplitter::encodeMessage(
@@ -568,7 +585,6 @@ void handleData::deleteGroup(const TcpConnectionPtr& conn,
         return;
     }
 
-    // 立即执行权限分配与删库
     if (rank == "owner") {
         redis.delPerson(key, userAcc, "owner");
         conn->send(MessageSplitter::encodeMessage(
@@ -583,12 +599,9 @@ void handleData::deleteGroup(const TcpConnectionPtr& conn,
 void handleData::gChat(const TcpConnectionPtr& conn,
                        nlohmann::json& jsonData,
                        redisCmd& redis) {
-    // 前端传来的是 mygp: 前缀，满足 ismygroup 的查询要求
     if (redis.ismygroup(jsonData["name"], jsonData["account"])) {
         redis.getGroupMeg(jsonData["name"], jsonData["account"], conn, -100);
 
-        // 【核心修复】强制剥离 mygp:，转换为 user:
-        // 前缀存入状态机，确保能收到实时消息
         std::string userAccount =
             "user:" + jsonData["account"].get<std::string>().substr(5);
         std::string key =
@@ -654,7 +667,6 @@ void handleData::seeHistory(const TcpConnectionPtr& conn,
     } else {
         redis.sendGroupHistoryMeg(jsonData, conn);
     }
-    // 【核心修复】：无论私聊还是群聊，强制下发历史结束标志打断前端转圈
     conn->send(MessageSplitter::encodeMessage(
         sendMeg("以上为历史消息", Type::USAT).dump()));
 }
@@ -676,10 +688,8 @@ void handleData::revise(const TcpConnectionPtr& conn,
     } else if (jsonData.contains("myname")) {
         redis.reviseData(jsonData["account"], "myname", jsonData["myname"]);
     } else if (jsonData.contains("color")) {
-        // [新增] 监听前端发来的 color 修改请求，更新个人颜色
         redis.reviseData(jsonData["account"], "color", jsonData["color"]);
     } else if (jsonData.contains("groupColor")) {
-        // [新增] 监听前端发来的群聊颜色修改请求（前缀严格对齐 gcor:）
         redis.reviseData("gcor:" + jsonData["groupName"].get<std::string>(),
                          "color", jsonData["groupColor"]);
     }
@@ -710,7 +720,6 @@ void handleData::see(const TcpConnectionPtr& conn,
             j["type"] = "see";
             j["name"] = field;
             j["myname"] = redis.getData(field, "myname");
-            // [新增] 获取好友列表时，提取并下发该好友的专属颜色
             j["color"] = redis.getData(field, "color");
             j["see"] = "friend";
             j["mystate"] = redis.getData(field, "mystate");
@@ -730,8 +739,6 @@ void handleData::seeGroup(const TcpConnectionPtr& conn,
     auto result = redis.seeGroup(jsonData["account"]);
     LOG_INFO << "退出seegroup";
 
-    // [修改]
-    // 提取判断标志：区分前端是在拉取【群聊列表】还是在拉取【群内成员列表】
     bool isMembers =
         jsonData["account"].get<std::string>().substr(0, 5) == "grop:";
 
@@ -745,13 +752,10 @@ void handleData::seeGroup(const TcpConnectionPtr& conn,
                 j["amount"] = arr[i + 1].as_string();
                 j["type"] = "seegroup";
 
-                // [新增核心] 如果拉取的是群聊列表，获取表 gcor:
-                // 中的群聊专属颜色
                 if (!isMembers) {
                     j["color"] =
                         redis.getData("gcor:" + arr[i].as_string(), "color");
                 } else {
-                    // [新增核心] 如果拉取的是群成员，下发各成员的个人昵称和颜色
                     j["myname"] = redis.getData(arr[i].as_string(), "myname");
                     j["color"] = redis.getData(arr[i].as_string(), "color");
                 }

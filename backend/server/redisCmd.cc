@@ -11,7 +11,7 @@ int redisCmd::assignId() {
     int id;
     redisClient.incr("user_id_counter", [&id](cpp_redis::reply& reply) {
         if (reply.is_integer()) {
-            id = reply.as_integer();  // 得到新用户的唯一 id
+            id = reply.as_integer();
         }
     });
     redisClient.sync_commit();
@@ -200,8 +200,9 @@ int redisCmd::verifyUser(nlohmann::json& data) {
             }
         } else if (j["name"] == "grop:" + a && j["type"] == "invitation") {
             if (data["result"] == "yes") {
-                reviseData(dataa, data["name"], "0");
+                reviseData("mygp:" + dataa.substr(5), data["name"], "0");
                 reviseData("grop:" + a, "user:" + dataa.substr(5), "member");
+
                 redisClient.lrem(last, 0, item.as_string());
                 redisClient.sync_commit();
                 return 2;
@@ -328,34 +329,32 @@ void redisCmd::sendHisOffineMeg(nlohmann::json& data,
     }
 }
 void redisCmd::delFriend(std::string user, std::string name) {
-    // 强制提取纯数字 ID
     std::string key1 = "frie:" + user.substr(5);
     std::string key2 = "frie:" + name.substr(5);
-    std::vector<std::string> field1 = {name}; 
-    std::vector<std::string> field2 = {user}; 
-    
-    // 1. 删除双方的聊天记录表
+    std::vector<std::string> field1 = {name};
+    std::vector<std::string> field2 = {user};
+
     std::string key = tool::swapsort(user, name, "read:");
     redisClient.del({key});
-    
-    // 2. 安全地获取并删除未读离线消息 (判空防 stoi 崩溃)
+
     std::string offlCount1 = getData(key1, name);
     if (offlCount1 != "null") {
         int count1 = std::stoi(offlCount1);
         for (int i = 0; i < count1; i++) {
-            redisClient.hdel("offl:" + user.substr(5), {name + std::to_string(i)});
+            redisClient.hdel("offl:" + user.substr(5),
+                             {name + std::to_string(i)});
         }
     }
-    
+
     std::string offlCount2 = getData(key2, user);
     if (offlCount2 != "null") {
         int count2 = std::stoi(offlCount2);
         for (int i = 0; i < count2; i++) {
-            redisClient.hdel("offl:" + name.substr(5), {user + std::to_string(i)});
+            redisClient.hdel("offl:" + name.substr(5),
+                             {user + std::to_string(i)});
         }
     }
-    
-    // 3. 彻底删除好友关系
+
     redisClient.hdel(key1, field1);
     redisClient.hdel(key2, field2);
     redisClient.sync_commit();
@@ -510,13 +509,14 @@ void redisCmd::sendHisMeg1(nlohmann::json& data, const TcpConnectionPtr conn) {
     }
 }
 
-void redisCmd::sendGroupHistoryMeg(nlohmann::json& data, const TcpConnectionPtr conn) {
-    std::string key = data["account"]; 
+void redisCmd::sendGroupHistoryMeg(nlohmann::json& data,
+                                   const TcpConnectionPtr conn) {
+    std::string key = data["account"];
     std::string nkey = "regp:" + key.substr(5);
     int step = data.contains("step") ? data["step"].get<int>() : 1;
     int start = -100 * step;
     int end = start + 99;
-    
+
     auto reply = redisClient.lrange(nkey, start, end);
     redisClient.sync_commit();
     auto result = reply.get();
@@ -538,7 +538,6 @@ void redisCmd::setNewUser(nlohmann::json& data) {
     redisClient.hset(key, "password", password);
     redisClient.hset(key, "email", qqemail);
     redisClient.hset(key, "myname", myname);
-    // [新增] 注册时分配默认的个人头像颜色（深蓝色）
     redisClient.hset(key, "color", "#3b82f6");
     redisClient.sync_commit();
 }
@@ -549,7 +548,6 @@ void redisCmd::returnUser(nlohmann::json& data) {
     data["email"] = getData(account, "email");
     data["myname"] = getData(account, "myname");
     data["password"] = getData(account, "password");
-    // [新增] 登录成功时，向前端下发用户的颜色
     data["color"] = getData(account, "color");
     data["type"] = "information";
 }
@@ -563,7 +561,6 @@ void redisCmd::createGroup(nlohmann::json& data) {
     for (int i = 0; i < count; i++) {
         joinGroup(key, data["member" + std::to_string(i)], "member");
     }
-    // [新增] 创建群聊时，在独立表 gcor: 中存储群专属颜色（默认紫色）
     redisClient.hset("gcor:" + name, "color", "#a855f7");
     redisClient.sync_commit();
 }
@@ -584,7 +581,6 @@ void redisCmd::delPerson(std::string name,
         }
         redisClient.del({"grop:" + name});
         redisClient.del({"regp:" + name});
-        // [新增] 群主解散群聊时，同步清理该群的专属颜色数据表
         redisClient.del({"gcor:" + name});
     } else {
         redisClient.hdel("grop:" + name, {account});

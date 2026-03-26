@@ -8,12 +8,17 @@
       </div>
     </div>
 
+    <div v-if="showImagePreview" class="fixed inset-0 z-[200] bg-black/90 flex items-center justify-center p-4 cursor-zoom-out transition-opacity" @click="showImagePreview = false">
+      <img :src="previewImageUrl" class="max-w-full max-h-full object-contain shadow-2xl" @click.stop />
+      <button class="absolute top-6 right-6 text-white text-3xl font-bold hover:text-gray-300 transition" @click="showImagePreview = false">✕</button>
+    </div>
+
     <div v-if="!isLoggedIn" class="bg-white p-8 rounded-lg shadow-lg w-96">
       <h2 class="text-2xl font-bold mb-6 text-center text-gray-800">
-        {{ isRegisterMode ? '用户注册' : '分布式聊天室' }}
+        {{ isRegisterMode ? '用户注册' : 'NexusTalk聊天室' }}
       </h2>
       <div class="mb-4">
-        <label class="block text-sm font-medium text-gray-700">账号 (输入纯数字或字母)</label>
+        <label class="block text-sm font-medium text-gray-700">账号</label>
         <input v-model="loginForm.account" @keyup.enter="handleSubmit" type="text" class="mt-1 block w-full border border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500">
       </div>
       <div :class="isRegisterMode ? 'mb-4' : 'mb-6'">
@@ -155,37 +160,37 @@
           </div>
 
           <div class="flex-1 overflow-y-auto p-6 space-y-6 relative" ref="messageContainer" @scroll="handleChatScroll">
-            <div v-if="isLoadingHistory" class="text-center text-xs text-gray-400 my-2">
-              <span class="inline-block animate-pulse">正在加载历史消息...</span>
+            <div v-if="isLoadingHistory" class="text-center text-xs text-blue-400 my-2 py-1 bg-blue-50 rounded-full w-32 mx-auto">
+              <span class="inline-block animate-pulse">正在加载数据...</span>
             </div>
-            <div v-if="!hasMoreHistory && messages.length > 0" class="text-center text-xs text-gray-300 my-2">
-              已经到底了
+            <div v-if="!hasMoreHistory && messages.length > 0 && !isLoadingHistory" class="text-center text-xs text-gray-300 my-2">
+              ------ 已经到底了 ------
             </div>
 
-            <div v-for="(msg, index) in messages" :key="index" :class="['flex', msg.isMine ? 'justify-end' : 'justify-start']">
+            <div v-for="(msg, index) in messages" :key="index" :class="['flex relative', msg.isMine ? 'justify-end' : 'justify-start']">
               
               <div v-if="!msg.isMine" class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold mr-3 shrink-0 shadow-sm mt-2" :style="{ backgroundColor: msg.senderColor }">
                 {{ msg.senderName ? msg.senderName.charAt(0) : 'U' }}
               </div>
 
               <div :class="['flex flex-col max-w-[70%]', msg.isMine ? 'items-end' : 'items-start']">
-                <div class="text-xs text-gray-500 mb-1 mx-1 flex items-center gap-2">
-                  <span>{{ msg.senderName }}</span>
-                  <span v-if="msg.sendTime" class="text-[10px] text-gray-400 font-normal">{{ msg.sendTime }}</span>
+                <div class="text-xs text-gray-500 mb-1 mx-1 flex items-center gap-2 max-w-full overflow-hidden">
+                  <span class="truncate">{{ msg.senderName }}</span>
+                  <span v-if="msg.sendTime" class="text-[10px] text-gray-400 font-normal shrink-0">{{ msg.sendTime }}</span>
                 </div>
                 
-                <div :class="['rounded-xl p-3 shadow-sm', msg.isMine ? 'bg-blue-500 text-white rounded-tr-sm' : 'bg-white text-gray-800 rounded-tl-sm border border-gray-100']">
+                <div :class="['rounded-xl p-3 shadow-sm break-words break-all overflow-hidden', msg.isMine ? 'bg-blue-500 text-white rounded-tr-sm' : 'bg-white text-gray-800 rounded-tl-sm border border-gray-100']">
                   <div v-if="msg.isFile">
-                    <template v-if="msg.fileUrl.match(/\.(jpeg|jpg|gif|png|webp|bmp)$/i)">
-                      <img :src="msg.fileUrl" class="max-w-xs max-h-48 rounded cursor-pointer border border-gray-200" @click="window.open(msg.fileUrl)" />
+                    <template v-if="msg.fileUrl.match(/\.(jpeg|jpg|gif|png|webp|bmp)(\?.*)?$/i)">
+                      <img :src="msg.fileUrl" class="max-w-xs max-h-48 rounded cursor-zoom-in border border-gray-200" @click.stop="previewImage(msg.fileUrl)" />
                     </template>
                     <template v-else>
-                      <a :href="msg.fileUrl" target="_blank" class="underline flex items-center gap-2 hover:text-blue-200">
-                        <File class="w-4 h-4" /> {{ msg.fileName }}
+                      <a :href="msg.fileUrl" target="_blank" class="underline flex items-center gap-2 hover:text-blue-200 text-sm overflow-hidden break-words break-all">
+                        <File class="w-4 h-4 shrink-0" /> <span class="break-all">{{ msg.fileName }}</span>
                       </a>
                     </template>
                   </div>
-                  <span v-else class="break-words whitespace-pre-wrap leading-relaxed">{{ msg.cleanContent }}</span>
+                  <span v-else class="break-words break-all whitespace-pre-wrap leading-relaxed">{{ msg.cleanContent }}</span>
                 </div>
               </div>
 
@@ -278,7 +283,7 @@
         <button @click="showGroupSettingsModal = false" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600">✕</button>
         <h3 class="text-xl font-bold mb-4 text-gray-800">群聊设置</h3>
         
-        <div v-if="myGroupRank === 'owner' || myGroupRank === 'admin'" class="mb-4 bg-gray-50 p-3 rounded">
+        <div v-if="myGroupRank === 'owner' || myGroupRank === 'admin'" class="mb-4 bg-gray-50 p-3 rounded border border-gray-200">
           <label class="block text-xs text-gray-500 mb-2">修改群头像颜色</label>
           <div class="flex gap-2 justify-between">
             <button v-for="c in colorPalette" :key="c" @click="profileForm.newGroupColor = c"
@@ -286,6 +291,19 @@
                     :style="{ backgroundColor: c }"></button>
             <button @click="submitGroupColor" class="px-2 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded text-xs font-bold transition">保存</button>
           </div>
+        </div>
+
+        <div class="mb-4 bg-gray-50 p-3 rounded border border-gray-200">
+          <label class="block text-xs text-gray-500 mb-2">邀请好友入群</label>
+          <div class="max-h-32 overflow-y-auto border border-gray-200 rounded p-2 bg-white space-y-1 mb-3">
+            <div v-if="inviteableFriends.length === 0" class="text-xs text-gray-400 text-center py-2">暂无可邀请的好友</div>
+            <label v-for="friend in inviteableFriends" :key="friend.name" class="flex items-center gap-2 p-1 hover:bg-gray-50 rounded cursor-pointer">
+              <input type="checkbox" :value="friend.name.replace('user:', '')" v-model="inviteForm.selectedFriends" class="rounded text-blue-500">
+              <div class="w-6 h-6 rounded-full flex items-center justify-center text-white text-xs" :style="{ backgroundColor: friend.color }">{{ friend.myname ? friend.myname.charAt(0) : 'F' }}</div>
+              <span class="text-sm text-gray-700">{{ friend.myname }}</span>
+            </label>
+          </div>
+          <button @click="submitInvite" class="w-full px-3 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded text-sm transition font-bold shadow-sm">发送邀请</button>
         </div>
 
         <div class="text-sm font-bold text-gray-500 mb-2 border-b pb-2">成员列表 ({{ currentGroupMembers.length }} 人)</div>
@@ -401,7 +419,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, nextTick, computed } from 'vue';
+import { ref, reactive, nextTick, computed, onMounted, onUnmounted } from 'vue';
 import axios from 'axios';
 import { MessageCircle, Users, User, LogOut, Folder, File, Bell, PlusCircle, Settings } from 'lucide-vue-next';
 
@@ -490,6 +508,40 @@ const showNotifModal = ref(false);
 const notifications = ref([]);
 const showLogoutConfirmModal = ref(false); 
 
+// 邀请好友状态控制
+const inviteForm = reactive({ selectedFriends: [] });
+
+// 动态过滤掉已经在群里的好友
+const inviteableFriends = computed(() => {
+  return friendsList.value.filter(f => !currentGroupMembers.value.some(m => m.name === "user:" + f.name));
+});
+
+const showImagePreview = ref(false);
+const previewImageUrl = ref('');
+
+const previewImage = (url) => {
+  previewImageUrl.value = url;
+  showImagePreview.value = true;
+};
+
+// 提交多选的好友邀请
+const submitInvite = () => {
+  if (inviteForm.selectedFriends.length === 0) return showToast("请先选择要邀请的好友", "error");
+  const pureName = currentContact.value.id.replace('grop:', '');
+  
+  inviteForm.selectedFriends.forEach(targetUser => {
+    ws.send(JSON.stringify({ 
+      type: "invite", 
+      account: "user:" + loginForm.account, 
+      target: "user:" + targetUser, 
+      group: "grop:" + pureName 
+    }));
+  });
+  
+  showToast("邀请请求已全部发送！", "success");
+  inviteForm.selectedFriends = [];
+};
+
 const myGroupRank = computed(() => {
   const me = currentGroupMembers.value.find(m => m.name === "user:" + loginForm.account);
   return me ? me.rank : 'member';
@@ -497,12 +549,45 @@ const myGroupRank = computed(() => {
 
 let ws = null;
 
+const scrollToBottom = (isInitial = false) => {
+  nextTick(() => {
+    const box = messageContainer.value;
+    if (!box) return;
+
+    if (isInitial) {
+        box.scrollTop = box.scrollHeight + 9999;
+    } else {
+        box.scrollTo({ top: box.scrollHeight + 9999, behavior: 'smooth' });
+    }
+
+    setTimeout(() => {
+      if (messageContainer.value) {
+        if (isInitial) {
+            messageContainer.value.scrollTop = messageContainer.value.scrollHeight + 9999;
+        } else {
+            messageContainer.value.scrollTo({ top: messageContainer.value.scrollHeight + 9999, behavior: 'smooth' });
+        }
+      }
+    }, 200);
+  });
+};
+
+const handleBeforeUnload = () => {
+  if (ws && ws.readyState === WebSocket.OPEN && isLoggedIn.value) {
+    ws.send(JSON.stringify({ type: "ship", account: "user:" + loginForm.account, mystate: "offline" }));
+    ws.close();
+  }
+};
+onMounted(() => { window.addEventListener('beforeunload', handleBeforeUnload); });
+onUnmounted(() => { window.removeEventListener('beforeunload', handleBeforeUnload); });
+
 const ensureWebSocket = (onReadyCallback) => {
   if (ws && ws.readyState === WebSocket.OPEN) {
     onReadyCallback();
     return;
   }
-  ws = new WebSocket('ws://127.0.0.1:8081');
+  const serverIp = window.location.hostname;
+  ws = new WebSocket(`ws://${serverIp}:8081`);
   ws.onopen = () => onReadyCallback();
   ws.onmessage = (event) => {
     try {
@@ -522,23 +607,29 @@ const ensureWebSocket = (onReadyCallback) => {
               messages.value = [...tempHistoryChunk, ...messages.value];
               tempHistoryChunk = [];
             }
-            isFetchingOldHistory.value = false;
-            isLoadingHistory.value = false;
-            nextTick(() => {
+          }
+
+          // 历史记录硬性按时间升序排，消除倒置错乱
+          messages.value.sort((a, b) => {
+            const timeA = a.sendTime || '';
+            const timeB = b.sendTime || '';
+            return timeA.localeCompare(timeB);
+          });
+
+          isFetchingOldHistory.value = false;
+          isLoadingHistory.value = false;
+
+          nextTick(() => {
+            if (isInitialLoad.value) {
+              isInitialLoad.value = false;
+              scrollToBottom(true); // 初次载入，瞬间置底
+            } else {
               if (messageContainer.value && historyScrollHeight.value > 0) {
                 messageContainer.value.scrollTop = messageContainer.value.scrollHeight - historyScrollHeight.value;
                 historyScrollHeight.value = 0;
               }
-            });
-          } else {
-            isLoadingHistory.value = false;
-            nextTick(() => {
-              if (isInitialLoad.value) {
-                scrollToBottom();
-                isInitialLoad.value = false;
-              }
-            });
-          }
+            }
+          });
           return;
         }
 
@@ -547,6 +638,7 @@ const ensureWebSocket = (onReadyCallback) => {
           showToast(data.meg, data.meg.includes('错误') || data.meg.includes('失败') || data.meg.includes('不够') || data.meg.includes('不存在') || data.meg.includes('有误') ? 'error' : 'success');
         }
         
+        // 【核心修复】：全部匹配 C++ 后端的简体中文消息！
         if (data.meg === '成功登陆') {
           isLoggedIn.value = true;
           ws.send(JSON.stringify({ type: "ship", account: "user:" + loginForm.account, mystate: "online" }));
@@ -629,7 +721,6 @@ const ensureWebSocket = (onReadyCallback) => {
       else if (data.type === 'message' || data.type === 'gmessage') {
         const serverAccount = "user:" + loginForm.account;
         
-        // [修复] 更宽泛的 URL 匹配正则，支持 localhost 和任意域名的图片直出
         let isFileMatch = false;
         let extFileUrl = '';
         let extFileName = '';
@@ -654,13 +745,19 @@ const ensureWebSocket = (onReadyCallback) => {
         const parsed = parseContent(data.things, rawSName);
         const chatType = data.type === 'gmessage' ? 'group' : 'friend';
         
-        // [核心修复] 文件解析脱离对 127.0.0.1 的硬编码绑定
         if (parsed.clean.startsWith('[文件]') && parsed.clean.includes('http')) {
             isFileMatch = true;
             const splitIndex = parsed.clean.indexOf(' : http');
             if (splitIndex !== -1) {
                 extFileName = parsed.clean.substring(4, splitIndex).trim();
-                extFileUrl = parsed.clean.substring(splitIndex + 3).trim();
+                let rawUrl = parsed.clean.substring(splitIndex + 3).trim();
+                try {
+                    let parsedUrl = new URL(rawUrl);
+                    parsedUrl.hostname = window.location.hostname;
+                    extFileUrl = parsedUrl.toString();
+                } catch (e) {
+                    extFileUrl = rawUrl;
+                }
             } else {
                 extFileUrl = parsed.clean;
                 extFileName = '收到的文件';
@@ -682,39 +779,41 @@ const ensureWebSocket = (onReadyCallback) => {
            }
         }
         
-        let recent = recentChats.value.find(r => r.id === contactId);
-        if (!recent) {
-          let displayTitle = contactId.replace('user:', '').replace('grop:', '');
-          let chatColor = chatType === 'group' ? '#a855f7' : '#3b82f6';
+        if (!isFetchingOldHistory.value && !isLoadingHistory.value) {
+            let recent = recentChats.value.find(r => r.id === contactId);
+            if (!recent) {
+              let displayTitle = contactId.replace('user:', '').replace('grop:', '');
+              let chatColor = chatType === 'group' ? '#a855f7' : '#3b82f6';
 
-          if (chatType === 'friend') {
-            const f = friendsList.value.find(f => "user:" + f.name === contactId);
-            if (f && f.myname) displayTitle = f.myname;
-            if (f && f.color) chatColor = f.color;
-          } else {
-            const g = groupsList.value.find(g => "grop:" + g.name === contactId);
-            if (g && g.color) chatColor = g.color;
-          }
+              if (chatType === 'friend') {
+                const f = friendsList.value.find(f => "user:" + f.name === contactId);
+                if (f && f.myname) displayTitle = f.myname;
+                if (f && f.color) chatColor = f.color;
+              } else {
+                const g = groupsList.value.find(g => "grop:" + g.name === contactId);
+                if (g && g.color) chatColor = g.color;
+              }
 
-          recent = { id: contactId, type: chatType, title: displayTitle, avatar: displayTitle.charAt(0), lastMsg: '', time: '', unread: 0, color: chatColor };
-          recentChats.value.unshift(recent);
-        } else {
-          recentChats.value = [recent, ...recentChats.value.filter(r => r.id !== contactId)];
+              recent = { id: contactId, type: chatType, title: displayTitle, avatar: displayTitle.charAt(0), lastMsg: '', time: '', unread: 0, color: chatColor };
+              recentChats.value.unshift(recent);
+            } else {
+              recentChats.value = [recent, ...recentChats.value.filter(r => r.id !== contactId)];
+            }
+            recent.lastMsg = parsed.clean;
+            recent.time = parsed.time || getFullTime();
+            
+            const isCurrentWindow = currentContactType.value === chatType && currentContact.value?.id === contactId;
+            if (!isMine && !isCurrentWindow) {
+              recent.unread += 1;
+            }
         }
-
-        recent.lastMsg = parsed.clean;
-        recent.time = parsed.time || getFullTime();
 
         const isCurrentWindow = currentContactType.value === chatType && currentContact.value?.id === contactId;
         
-        if (!isMine && !isCurrentWindow) {
-          recent.unread += 1;
-        }
-
         if (isCurrentWindow) {
-          const msgHash = parsed.clean + parsed.time + finalSenderName;
-          if (!messageSet.has(msgHash)) {
-            messageSet.add(msgHash);
+          const finalMsgId = data.msgId || (parsed.clean + parsed.time + finalSenderName);
+          if (!messageSet.has(finalMsgId)) {
+            messageSet.add(finalMsgId);
             const msgObj = {
               isMine: isMine,
               senderName: finalSenderName,
@@ -730,7 +829,9 @@ const ensureWebSocket = (onReadyCallback) => {
               tempHistoryChunk.push(msgObj);
             } else {
               messages.value.push(msgObj);
-              if (!isLoadingHistory.value) scrollToBottom();
+              if (!isLoadingHistory.value) {
+                 scrollToBottom(false); 
+              }
             }
           }
         } else {
@@ -843,6 +944,16 @@ const selectContact = (contact, type) => {
     currentGroupMembers.value = [];
     ws.send(JSON.stringify({ type: "seegroup", rank: "all", account: "grop:" + pureName }));
   }
+  
+  setTimeout(() => {
+      isLoadingHistory.value = false;
+      isFetchingOldHistory.value = false;
+      messages.value.sort((a, b) => (a.sendTime || '').localeCompare(b.sendTime || ''));
+      if(isInitialLoad.value) {
+          isInitialLoad.value = false;
+          scrollToBottom(true);
+      }
+  }, 3000);
 };
 
 const handleChatScroll = (e) => {
@@ -868,6 +979,18 @@ const loadFullHistory = () => {
   } else {
     ws.send(JSON.stringify({ type: "history", account: "grop:" + pureName, name: "user:" + loginForm.account, step: historyStep.value }));
   }
+
+  setTimeout(() => {
+      if (isFetchingOldHistory.value) {
+          if (tempHistoryChunk.length > 0) {
+              messages.value = [...tempHistoryChunk, ...messages.value];
+              tempHistoryChunk = [];
+          }
+          isFetchingOldHistory.value = false;
+      }
+      messages.value.sort((a, b) => (a.sendTime || '').localeCompare(b.sendTime || ''));
+      isLoadingHistory.value = false;
+  }, 3000);
 };
 
 const sendMessage = () => {
@@ -879,22 +1002,22 @@ const sendMessage = () => {
   const payload = buildPayload(inputText.value);
   const myCurrentName = myInfo.myname || loginForm.account;
   const myCurrentColor = myInfo.color || '#3b82f6';
+  const msgId = Date.now() + '-' + Math.random().toString(36).substr(2, 9);
 
   if (isGroup) {
     ws.send(JSON.stringify({
       type: "gmessage", account: serverAccount, from: "grop:" + pureTarget, things: payload,
-      senderName: myCurrentName, senderColor: myCurrentColor
+      senderName: myCurrentName, senderColor: myCurrentColor, msgId: msgId
     }));
   } else {
     ws.send(JSON.stringify({
       type: "message", from: serverAccount, to: "user:" + pureTarget, things: payload,
-      senderName: myCurrentName, senderColor: myCurrentColor
+      senderName: myCurrentName, senderColor: myCurrentColor, msgId: msgId
     }));
   }
   
   const parsedTime = getFullTime();
-  const msgHash = inputText.value + parsedTime + myCurrentName;
-  messageSet.add(msgHash);
+  messageSet.add(msgId);
 
   messages.value.push({ 
     isMine: true, 
@@ -906,14 +1029,26 @@ const sendMessage = () => {
   });
   
   let recent = recentChats.value.find(r => r.id === currentContact.value.id);
-  if (recent) {
+  if (!recent) {
+    recent = { 
+        id: currentContact.value.id, 
+        type: currentContactType.value, 
+        title: currentContact.value.myname || currentContact.value.id.replace('user:', '').replace('grop:', ''), 
+        avatar: (currentContact.value.myname || currentContact.value.id.replace('user:', '').replace('grop:', '')).charAt(0), 
+        lastMsg: inputText.value, 
+        time: parsedTime, 
+        unread: 0, 
+        color: currentContact.value.color || (currentContactType.value === 'group' ? '#a855f7' : '#3b82f6') 
+    };
+    recentChats.value.unshift(recent);
+  } else {
     recent.lastMsg = inputText.value;
     recent.time = parsedTime;
     recentChats.value = [recent, ...recentChats.value.filter(r => r.id !== currentContact.value.id)];
   }
   
   inputText.value = '';
-  scrollToBottom();
+  scrollToBottom(false); 
 };
 
 const openAddModal = () => {
@@ -1015,16 +1150,18 @@ const handleFileUpload = async (event) => {
   if (!file) return;
 
   const formData = new FormData();
-  formData.append('file', file);
+  formData.append('file', file, encodeURIComponent(file.name));
 
+  const serverIp = window.location.hostname;
+  
   try {
-    const res = await axios.post('http://127.0.0.1:8082/api/upload', formData, {
+    const res = await axios.post(`http://${serverIp}:8082/api/upload`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     });
 
     if (res.data.code === 200) {
       const fileUrl = res.data.data.url;
-      const fileName = res.data.data.fileName;
+      const fileName = file.name;
       const isGroup = currentContactType.value === 'group';
       const pureTarget = currentContact.value.id.replace('user:', '').replace('grop:', ''); 
       const serverAccount = "user:" + loginForm.account;
@@ -1032,13 +1169,15 @@ const handleFileUpload = async (event) => {
       const payload = buildPayload(`[文件] ${fileName} : ${fileUrl}`);
       const myCurrentName = myInfo.myname || loginForm.account;
       const myCurrentColor = myInfo.color || '#3b82f6';
+      const msgId = Date.now() + '-' + Math.random().toString(36).substr(2, 9);
 
       if (isGroup) {
-        ws.send(JSON.stringify({ type: "gmessage", account: serverAccount, from: "grop:" + pureTarget, things: payload, senderName: myCurrentName, senderColor: myCurrentColor }));
+        ws.send(JSON.stringify({ type: "gmessage", account: serverAccount, from: "grop:" + pureTarget, things: payload, senderName: myCurrentName, senderColor: myCurrentColor, msgId: msgId }));
       } else {
-        ws.send(JSON.stringify({ type: "message", from: serverAccount, to: "user:" + pureTarget, things: payload, senderName: myCurrentName, senderColor: myCurrentColor }));
+        ws.send(JSON.stringify({ type: "message", from: serverAccount, to: "user:" + pureTarget, things: payload, senderName: myCurrentName, senderColor: myCurrentColor, msgId: msgId }));
       }
 
+      messageSet.add(msgId);
       messages.value.push({ 
         isMine: true, 
         senderName: myCurrentName,
@@ -1049,18 +1188,12 @@ const handleFileUpload = async (event) => {
         fileUrl: fileUrl, 
         fileName: fileName 
       });
-      scrollToBottom();
+      scrollToBottom(false); 
     }
   } catch (err) {
     showToast('文件上传失败', 'error');
   }
   event.target.value = ''; 
-};
-
-const scrollToBottom = () => {
-  nextTick(() => {
-    if (messageContainer.value) messageContainer.value.scrollTop = messageContainer.value.scrollHeight;
-  });
 };
 
 const handleLogoutClick = () => {
