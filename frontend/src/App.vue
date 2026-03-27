@@ -15,10 +15,10 @@
 
     <div v-if="!isLoggedIn" class="bg-white p-8 rounded-lg shadow-lg w-96">
       <h2 class="text-2xl font-bold mb-6 text-center text-gray-800">
-        {{ isRegisterMode ? '用户注册' : 'NexusTalk聊天室' }}
+        {{ isRegisterMode ? '用户注册' : 'ZealChat 分布式聊天' }}
       </h2>
       <div class="mb-4">
-        <label class="block text-sm font-medium text-gray-700">账号</label>
+        <label class="block text-sm font-medium text-gray-700">账号 (输入纯数字或字母)</label>
         <input v-model="loginForm.account" @keyup.enter="handleSubmit" type="text" class="mt-1 block w-full border border-gray-300 rounded-md p-2 focus:ring-blue-500 focus:border-blue-500">
       </div>
       <div :class="isRegisterMode ? 'mb-4' : 'mb-6'">
@@ -348,12 +348,13 @@
         </select>
         <input v-if="addForm.type === 'add_friend'" v-model="addForm.target" placeholder="输入对方纯账号 (无需user:)" class="w-full mb-4 p-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
         <input v-if="addForm.type === 'join_group'" v-model="addForm.target" placeholder="输入群聊纯名称 (无需grop:)" class="w-full mb-4 p-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
+        
         <div v-if="addForm.type === 'create_group'" class="space-y-3">
           <input v-model="addForm.target" placeholder="输入新群聊名称 (必填)" class="w-full p-2 border border-gray-300 rounded focus:outline-none focus:border-blue-500">
           <div class="text-sm font-bold text-gray-700 mt-2">选择邀请的好友：</div>
           <div class="max-h-40 overflow-y-auto border border-gray-200 rounded p-2 bg-gray-50 space-y-1">
-            <div v-if="friendsList.length === 0" class="text-xs text-gray-400 text-center py-2">暂无好友可邀请</div>
-            <label v-for="friend in friendsList" :key="friend.name" class="flex items-center gap-2 p-1 hover:bg-gray-100 rounded cursor-pointer">
+            <div v-if="creatableFriends.length === 0" class="text-xs text-gray-400 text-center py-2">暂无好友可邀请</div>
+            <label v-for="friend in creatableFriends" :key="friend.name" class="flex items-center gap-2 p-1 hover:bg-gray-100 rounded cursor-pointer">
               <input type="checkbox" :value="friend.name.replace('user:', '')" v-model="addForm.selectedFriends" class="rounded text-blue-500">
               <div class="w-6 h-6 rounded-full flex items-center justify-center text-white text-xs" :style="{ backgroundColor: friend.color }">{{ friend.myname ? friend.myname.charAt(0) : 'F' }}</div>
               <span class="text-sm text-gray-700">{{ friend.myname }}</span>
@@ -425,10 +426,14 @@ import { MessageCircle, Users, User, LogOut, Folder, File, Bell, PlusCircle, Set
 
 const colorPalette = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#64748b'];
 
+// [核心修复 1] 强制弹窗队列截断，最多显示2个，防止被发信人刷屏绿框堆叠
 const toasts = ref([]);
 const showToast = (msg, type = 'success') => {
-  const id = Date.now();
+  const id = Date.now() + Math.random();
   toasts.value.push({ id, msg, type });
+  if (toasts.value.length > 2) {
+    toasts.value.shift(); // 超过2个直接顶掉最老的
+  }
   setTimeout(() => { toasts.value = toasts.value.filter(t => t.id !== id); }, 3000);
 };
 
@@ -508,12 +513,18 @@ const showNotifModal = ref(false);
 const notifications = ref([]);
 const showLogoutConfirmModal = ref(false); 
 
-// 邀请好友状态控制
 const inviteForm = reactive({ selectedFriends: [] });
 
-// 动态过滤掉已经在群里的好友
+const creatableFriends = computed(() => {
+  return friendsList.value.filter(f => f.name.replace('user:', '') !== loginForm.account);
+});
+
 const inviteableFriends = computed(() => {
-  return friendsList.value.filter(f => !currentGroupMembers.value.some(m => m.name === "user:" + f.name));
+  return friendsList.value.filter(f => {
+    const isSelf = f.name.replace('user:', '') === loginForm.account;
+    const isAlreadyInGroup = currentGroupMembers.value.some(m => m.name.replace('user:', '') === f.name.replace('user:', ''));
+    return !isSelf && !isAlreadyInGroup;
+  });
 });
 
 const showImagePreview = ref(false);
@@ -524,7 +535,6 @@ const previewImage = (url) => {
   showImagePreview.value = true;
 };
 
-// 提交多选的好友邀请
 const submitInvite = () => {
   if (inviteForm.selectedFriends.length === 0) return showToast("请先选择要邀请的好友", "error");
   const pureName = currentContact.value.id.replace('grop:', '');
@@ -609,7 +619,6 @@ const ensureWebSocket = (onReadyCallback) => {
             }
           }
 
-          // 历史记录硬性按时间升序排，消除倒置错乱
           messages.value.sort((a, b) => {
             const timeA = a.sendTime || '';
             const timeB = b.sendTime || '';
@@ -622,7 +631,7 @@ const ensureWebSocket = (onReadyCallback) => {
           nextTick(() => {
             if (isInitialLoad.value) {
               isInitialLoad.value = false;
-              scrollToBottom(true); // 初次载入，瞬间置底
+              scrollToBottom(true);
             } else {
               if (messageContainer.value && historyScrollHeight.value > 0) {
                 messageContainer.value.scrollTop = messageContainer.value.scrollHeight - historyScrollHeight.value;
@@ -638,13 +647,16 @@ const ensureWebSocket = (onReadyCallback) => {
           showToast(data.meg, data.meg.includes('错误') || data.meg.includes('失败') || data.meg.includes('不够') || data.meg.includes('不存在') || data.meg.includes('有误') ? 'error' : 'success');
         }
         
-        // 【核心修复】：全部匹配 C++ 后端的简体中文消息！
         if (data.meg === '成功登陆') {
           isLoggedIn.value = true;
           ws.send(JSON.stringify({ type: "ship", account: "user:" + loginForm.account, mystate: "online" }));
           heartbeatTimer = setInterval(() => {
-            if (ws && ws.readyState === WebSocket.OPEN && isLoggedIn.value) ws.send(JSON.stringify({ type: "tcp" }));
-          }, 30000);
+            if (ws && ws.readyState === WebSocket.OPEN && isLoggedIn.value) {
+                ws.send(JSON.stringify({ type: "tcp" }));
+                // [核心修复 2]：心跳机制中加入通知静默拉取，10秒获取一次，有了消息立刻触发小红点！
+                fetchNotifications(true); 
+            }
+          }, 10000);
           fetchFriends();
           fetchGroups();
           fetchNotifications();
@@ -714,7 +726,8 @@ const ensureWebSocket = (onReadyCallback) => {
         }
       }
       else if (data.type === 'messdata') {
-        if (!notifications.value.some(n => JSON.stringify(n) === JSON.stringify(data))) {
+        // [核心修复 3]：更加严苛的防重复过滤器，配合静默轮询确保红点逻辑精确无误
+        if (!notifications.value.some(n => n.account === data.account && n.use === data.use && n.name === data.name)) {
           notifications.value.push(data);
         }
       }
@@ -888,6 +901,13 @@ const handleSubmit = () => {
   });
 };
 
+// [新增] 静默拉取参数，确保红点轮询时不会造成页面内闪烁
+const fetchNotifications = (isSilent = false) => {
+  if (!isSilent) notifications.value = [];
+  ws.send(JSON.stringify({ type: "messdata", account: "mess:user:" + loginForm.account }));
+  ws.send(JSON.stringify({ type: "messdata", account: "mess:grop:" + loginForm.account }));
+};
+
 const fetchFriends = () => {
   friendsList.value = []; 
   ws.send(JSON.stringify({ type: "see", see: "friend", account: "frie:" + loginForm.account }));
@@ -896,12 +916,6 @@ const fetchFriends = () => {
 const fetchGroups = () => {
   groupsList.value = []; 
   ws.send(JSON.stringify({ type: "seegroup", rank: "all", account: "mygp:" + loginForm.account }));
-};
-
-const fetchNotifications = () => {
-  notifications.value = [];
-  ws.send(JSON.stringify({ type: "messdata", account: "mess:user:" + loginForm.account }));
-  ws.send(JSON.stringify({ type: "messdata", account: "mess:grop:" + loginForm.account }));
 };
 
 const switchTab = (tab) => {
